@@ -7,7 +7,9 @@
     },
     "permissions": [
         "scripting",
-        "activeTab"
+        "activeTab",
+        "tabs",
+        "windows"
     ],
     "host_permissions": [
         "https://*/*",

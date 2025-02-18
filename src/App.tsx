@@ -7,7 +7,6 @@ const openai = new OpenAI({
   apiKey: import.meta.env.VITE_OPEN_AI_API_KEY,
   dangerouslyAllowBrowser: true
 });
-console.log(openai);
 
 const TEMPERATURE = 0.69;
 const MAX_TOKENS = 500;
@@ -25,13 +24,12 @@ function App() {
     setIsOpen(!isOpen);
   };
 
-  const handleLanguageSelect = (language:string) => {
+  const handleLanguageSelect = (language: string) => {
     setSelectedLanguage(language);
     setIsOpen(false);
   };
 
   const handleSummaryLengthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Only allow numbers and empty string
     const value = e.target.value;
     if (value === '' || /^\d+$/.test(value)) {
       setSummaryLength(value);
@@ -46,121 +44,91 @@ function App() {
     return length;
   };
 
-  const injectModal = async (summary: string) => {
-    // Get the current active tab
+  const createPopupWindow = async (summary: string) => {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab.id) {
-        console.error('No tab ID found');
-        return;
-    }
-    
-  
-    // Execute script in the context of the webpage
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (summaryText) => {
-        try {
-          // Check if modal container already exists
-          let modalContainer = document.getElementById('extension-modal-container');
-          if (!modalContainer) {
-            // If not, create it
-            modalContainer = document.createElement('div');
-            modalContainer.id = 'extension-modal-container';
-            document.body.insertBefore(modalContainer, document.body.firstChild);
-          }
-    
-          // Create the HTML structure for the modal
-          const modalHTML = `
-            <div class="modal-overlay">
-              <button class="modal-close">×</button>
-              <div class="modal-content">
-                <h3 style="margin-top: 2px; 
-                margin-bottom: 5px;
-                font-size: 30px;
-                font-color: black">Page Summary</h3>
-                <p class="modal-text">${summaryText}</p>
-              </div>
-            </div>
-          `;
-    
-          // Insert the modal HTML into the container
-          modalContainer.innerHTML = modalHTML;
-    
-          // Create and add styles to the page
-          const styles = document.createElement('style');
-          styles.textContent = `
-            .modal-overlay {
-              position: relative;     // Changed from 'fixed' to 'absolute'
-              top: 20px;             // Instead of 0, give it some spacing from top
-              right: 20px;           // Position it in the top-right corner
-              width: 300px;          // Set a specific width
-              background-color: white;
-              border-radius: 8px;
-              box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-              z-index: 9999;
-              padding: 15px;
-              border: 1px solid #ddd;
-            }
-
-            .modal-content {
-              position: relative;
-              width: 100%;
-              max-height: 400px;     // Limit maximum height
-              overflow-y: auto;      // Allow scrolling if content is too long
-            }
-
-            .modal-close {
-              position: absolute;
-              top: 10px;
-              right: 10px;
-              border: none;
-              background: none;
-              font-size: 30px;
-              cursor: pointer;
-              color: #666;
-            }
-
-            .modal-close:hover {
-              color: #333;
-            }
-            .modal-text {
-              font-size: small;
-              text-align: justify;
-              margin = 3px;
-            }
-          `;
-          document.head.appendChild(styles);
-
-          // Add event listeners for closing
-          const closeBtn = modalContainer.querySelector('.modal-close');
-          const overlay = modalContainer.querySelector('.modal-overlay');
-          
-          if (closeBtn && overlay) {
-            closeBtn.addEventListener('click', () => {
-              try {
-                modalContainer.remove();
-              } catch (error) {
-                console.error('Error removing modal:', error);
+      // Create HTML content for the popup
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Page Summary</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 16px;
+                background-color: white;
+                overflow: auto;
+                height: 100vh;
               }
-            });
-          }
-      } catch (error) {
-        console.error('Error in injected script:', error);
-        throw error; // Re-throw to be caught by the outer try-catch
-      }
-        },
-        args: [summary]
-      }).catch(error => {
-        console.error('Error executing script:', error);
-        throw error; // Re-throw to be caught by the outer try-catch
-      });
-      } catch (error) {
-        console.error('Error in injectModal:', error);
-        alert(`Failed to show modal: ${error}`);
-      }
-};
+              .summary-container {
+                background-color: white;
+                border-radius: 8px;
+                height: 100%;
+              }
+              h1 {
+                color: #333;
+                margin: 0 0 16px 0;
+                font-size: 18px;
+              }
+              .summary-text {
+                color: #444;
+                font-size: 14px;
+                line-height: 1.5;
+                text-align: justify;
+              }
+              .drag-handle {
+                -webkit-app-region: drag;
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 20px;
+                background: #f5f5f5;
+                border-bottom: 1px solid #ddd;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="drag-handle"></div>
+            <div class="summary-container">
+              <h1>Page Summary</h1>
+              <div class="summary-text">${summary}</div>
+            </div>
+          </body>
+        </html>
+      `;
 
+      // Create a Blob with the HTML content
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+
+      // Get the current window position to place the popup relative to it
+      const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const currentWindow = await chrome.windows.get(currentTab.windowId);
+
+      // Calculate position for the popup (offset from the current window)
+      const left = (currentWindow.left || 0) + 50;
+      const top = (currentWindow.top || 0) + 50;
+
+      // Create the popup window
+      await chrome.windows.create({
+        url: url,
+        type: 'popup',
+        width: 400,
+        height: 500,
+        left,
+        top,
+        focused: true
+      });
+
+      // Clean up the Blob URL
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error creating popup window:', error);
+      alert(`Failed to create popup: ${error}`);
+    }
+  };
 
   const getText = async (): Promise<string> => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -182,7 +150,7 @@ function App() {
       const text = await getText();
       console.log("Extracted Text:", text);
       const summary = await gpt_call(text);
-      await injectModal(summary);
+      await createPopupWindow(summary);
     } catch (error) {
       console.error("Error summarizing:", error);
       alert(error);
@@ -192,7 +160,7 @@ function App() {
   const gpt_call = async (context: string): Promise<string> => {
     try {
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini', 
+        model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: `Please write an effective and informative
@@ -210,6 +178,7 @@ function App() {
     }
   };
 
+  // Rest of your component's JSX remains the same
   return (
     <div className="container">
       <h1>API Summarizer</h1>
